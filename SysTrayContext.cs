@@ -4,18 +4,15 @@ using System.Text;
 using System.Windows.Forms;
 using System.Drawing;
 
-namespace forever
-{
-  class SysTrayContext : ApplicationContext
-  {
+namespace forever {
+  class SysTrayContext : ApplicationContext {
     private System.ComponentModel.IContainer container;
     private NotifyIcon notifyIcon;
     private ContextMenuStrip contextMenu;
     private ToolStripMenuItem menuItemExit;
     private Timer timer;
 
-    public SysTrayContext()
-    {
+    public SysTrayContext() {
       container = new System.ComponentModel.Container();
 
       notifyIcon = new NotifyIcon(this.container);
@@ -41,18 +38,16 @@ namespace forever
       timer.Start();
     }
 
-    void timer_Tick(object sender, EventArgs e)
-    {
-      if (!Program.WatchersRunning) ExitThreadCore();
+    void timer_Tick(object sender, EventArgs e) {
+      if(!Program.WatchersRunning)
+        ExitThreadCore();
     }
 
-    void menuItemExit_Click(object sender, EventArgs e)
-    {
+    void menuItemExit_Click(object sender, EventArgs e) {
       ExitThreadCore();
     }
 
-    protected override void ExitThreadCore()
-    {
+    protected override void ExitThreadCore() {
       Program.stop = true;
 
       notifyIcon.Visible = false;
