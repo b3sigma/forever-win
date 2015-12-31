@@ -48,7 +48,7 @@ namespace forever {
     }
 
     protected override void ExitThreadCore() {
-      Program.stop = true;
+      Program._stop = true;
 
       notifyIcon.Visible = false;
 

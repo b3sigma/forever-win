@@ -10,17 +10,20 @@ using System.Runtime.InteropServices;
 namespace forever {
 
   class Program {
-    public static volatile bool stop = false;
+    public static volatile bool _stop = false;
+    // This isn't really correct from a thread perspective,
+    // but worst case scenario a crashed app will be immediately restarted,
+    // so it should be fine.
+    public static volatile bool _restartWatch = false;
 
-    public static Thread[] runningWatchers;
-    public static string[] runningProcessNames;
+    public static Thread[] _runningWatchers;
+    public static string[] _runningProcessNames;
     public static string _watchFileName;
     public static int _watchFileSeconds = 20;
-    public static float lastWatchTime = 0.0f;
 
     public static bool WatchersRunning {
       get {
-        foreach(Thread t in runningWatchers) {
+        foreach(Thread t in _runningWatchers) {
           if(t.IsAlive) {
             return true;
           }
@@ -30,7 +33,6 @@ namespace forever {
     }
 
     static void Main(string[] args) {
-      //if(args.Length == 0 || (args.Length & 1) == 1) {
       if(args.Length <= 1) {
         Usage();
         return;
@@ -47,12 +49,12 @@ namespace forever {
         if(!args[pArg].StartsWith("--")) {
           startProgramList = pArg;
           break;
-        } else if(args[pArg].StartsWith("--watch_file", StringComparison.CurrentCultureIgnoreCase)) {
+        } else if(args[pArg].StartsWith("--watch_file=", StringComparison.CurrentCultureIgnoreCase)) {
           _watchFileName = args[pArg].Substring("--watch_file=".Length);
-        } else if(args[pArg].StartsWith("--watch_file_seconds", StringComparison.CurrentCultureIgnoreCase)) {
+        } else if(args[pArg].StartsWith("--watch_file_seconds=", StringComparison.CurrentCultureIgnoreCase)) {
           string numSeconds = args[pArg].Substring("--watch_file_seconds=".Length);
           _watchFileSeconds = Int32.Parse(numSeconds);
-        } else if(args[pArg].StartsWith("--watch_file_delay", StringComparison.CurrentCultureIgnoreCase)) {
+        } else if(args[pArg].StartsWith("--watch_file_delay=", StringComparison.CurrentCultureIgnoreCase)) {
           string numSeconds = args[pArg].Substring("--watch_file_delay=".Length);
           watchFileDelay = Int32.Parse(numSeconds);
         }
@@ -65,13 +67,13 @@ namespace forever {
         return;
       }
 
-      runningWatchers = new Thread[numPrograms];
-      runningProcessNames = new string[numPrograms];
+      _runningWatchers = new Thread[numPrograms];
+      _runningProcessNames = new string[numPrograms];
 
       for(int p = 0; p < numPrograms; p++) {
         int programIndex = startProgramList + (p * 2);
-        runningProcessNames[p] = args[programIndex]; 
-        StartAndWatch(args[programIndex], args[programIndex + 1], ref runningWatchers[p]);
+        _runningProcessNames[p] = System.IO.Path.GetFileNameWithoutExtension(args[programIndex]); 
+        StartAndWatch(args[programIndex], args[programIndex + 1], ref _runningWatchers[p]);
       }
 
       if(_watchFileName.Length > 2) {
@@ -86,36 +88,39 @@ namespace forever {
     }
 
     static void StartFileWatch(int startDelay) {
-       MessageBox.Show(
-        "Would have monitored [" + _watchFileName + "] with time + ["
-            + _watchFileSeconds + "] starting after [" + startDelay + "]" ,
-        "debuggo",
-        MessageBoxButtons.OK,
-        MessageBoxIcon.Information,
-        MessageBoxDefaultButton.Button1
-      );
-      return;
 
       Thread thread = new Thread(delegate() {
-
-        DateTime lastTime = System.IO.File.GetLastWriteTime(_watchFileName);
-
-        Thread.Sleep(startDelay * 1000);
-
+        
         while(true) {
 
-          DateTime thisTime = System.IO.File.GetLastWriteTime(_watchFileName);
+          if(_stop) {
+            break;
+          }
+
+          if(_restartWatch) {
+            _restartWatch = false;
+            Thread.Sleep(startDelay * 1000);
+            continue;
+          }
+
+          bool killAsWriteNeverHappened = false;
+          DateTime lastTime = DateTime.Now;
+          try {
+            lastTime = System.IO.File.GetLastWriteTime(_watchFileName);
+          } catch(Exception) {
+            killAsWriteNeverHappened = true;
+          }
 
           // if it hasn't changed in _watchFileSeconds (roughly since we last checked), assume it crashed
-          if(thisTime.Subtract(lastTime).Seconds > _watchFileSeconds) {
-            foreach (string processName in runningProcessNames) {
-              Process [] localByName = Process.GetProcessesByName(processName);
-              foreach(Process p in localByName)
-              {
-                 p.Kill();
+          if(killAsWriteNeverHappened || DateTime.Now.Subtract(lastTime).Seconds > _watchFileSeconds) {
+            foreach(string processName in _runningProcessNames) {
+              Process[] localByName = Process.GetProcessesByName(processName);
+              foreach(Process p in localByName) {
+                p.Kill();
               }
             }
 
+            // sleep again 
             Thread.Sleep(startDelay * 1000);
           } else {
             Thread.Sleep(_watchFileSeconds * 1000);
@@ -141,14 +146,6 @@ namespace forever {
 
     static void StartAndWatch(
         string fileName, string fileArgs, ref Thread thread) {
-      MessageBox.Show(
-        "Would have launched [" + fileName + "] with args + [" + fileArgs + "]",
-        "debuggo",
-        MessageBoxButtons.OK,
-        MessageBoxIcon.Information,
-        MessageBoxDefaultButton.Button1
-      );
-      return;
 
       thread = new Thread(delegate() {
         var psi = new ProcessStartInfo {
@@ -164,7 +161,7 @@ namespace forever {
         var rpsStowwatch = Stopwatch.StartNew();
 
         while(true) {
-          if(stop) {
+          if(_stop) {
             break;
           }
           if(runsPerSecond > 10) {
@@ -186,6 +183,7 @@ namespace forever {
               runsPerSecond = 0;
             }
             runsPerSecond++;
+            _restartWatch = true;
             int oldMode = SetErrorMode(3);
             var p = Process.Start(psi);
             SetErrorMode(oldMode);
